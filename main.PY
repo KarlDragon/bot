@@ -1,6 +1,5 @@
 import threading
 import time
-import random
 import tkinter as tk
 from tkinter import ttk
 from pynput.keyboard import Key, Controller as KeyController, Listener as KeyListener
@@ -44,97 +43,86 @@ def move_raw(dx, dy):
 # ============================================================
 
 running = False
-auto_move_enabled = True
 auto_click_enabled = True
 mouse_sway_enabled = True
+hold_shift_enabled = True
 
-w_time_min = 0
-w_time_max = 2000
-s_time_min = 0
-s_time_max = 2000
-click_interval_min = 500
-click_interval_max = 1000
-sway_offset_min = 0
-sway_offset_max = 100
-sway_speed_min = 0
-sway_speed_max = 10
+click_interval = 500
+sway_offset = 50
+sway_speed = 5
+sway_interval = 2000
 
 click_button_type = "left"  # "left" or "right"
 
 # ============================================================
-# SMOOTH SWAY FUNCTION (with randomization)
+# SHIFT HOLD LOOP
 # ============================================================
 
-def sway_mouse():
-    """Smooth mouse sway with randomized offset and speed."""
-    if not mouse_sway_enabled:
-        return
+def shift_hold_loop():
+    """Continuously hold left shift when running and enabled."""
+    global running
+    shift_held = False
     
-    # Randomize sway parameters
-    sway_offset = random.randint(sway_offset_min, sway_offset_max)
-    sway_speed = random.randint(sway_speed_min, sway_speed_max)
-    
-    if sway_offset <= 0:
-        return
-
-    steps = 20
-    step_size = sway_offset / steps
-    delay = sway_speed / 1000.0
-
-    # Right
-    for i in range(steps):
-        if not running:
-            break
-        move_raw(int(step_size), 0)
-        time.sleep(delay)
-
-    # Left
-    for i in range(steps):
-        if not running:
-            break
-        move_raw(int(-step_size), 0)
-        time.sleep(delay)
+    while True:
+        if running and hold_shift_enabled:
+            if not shift_held:
+                keyboard.press(Key.shift)
+                shift_held = True
+            time.sleep(0.1)
+        else:
+            if shift_held:
+                keyboard.release(Key.shift)
+                shift_held = False
+            time.sleep(0.1)
 
 # ============================================================
-# BOT LOOP (with randomization)
+# MOUSE SWAY LOOP (separate thread)
 # ============================================================
 
-def movement_loop():
+def sway_loop():
+    """Independent mouse sway loop with fixed timing."""
     global running
     while True:
-        if running and auto_move_enabled:
-            # Random W time
-            w_duration = random.randint(w_time_min, w_time_max)
-            keyboard.press('w')
-            time.sleep(w_duration / 1000)
-            keyboard.release('w')
+        if running and mouse_sway_enabled:
+            if sway_offset > 0:
+                steps = 20
+                step_size = sway_offset / steps
+                delay = sway_speed / 1000.0
 
-            # Random S time
-            s_duration = random.randint(s_time_min, s_time_max)
-            keyboard.press('s')
-            time.sleep(s_duration / 1000)
-            keyboard.release('s')
+                # Right
+                for i in range(steps):
+                    if not running:
+                        break
+                    move_raw(int(step_size), 0)
+                    time.sleep(delay)
 
-            # Smooth sway
-            sway_mouse()
-
+                # Left
+                for i in range(steps):
+                    if not running:
+                        break
+                    move_raw(int(-step_size), 0)
+                    time.sleep(delay)
+            
+            # Wait before next sway
+            time.sleep(sway_interval / 1000)
         else:
             time.sleep(0.1)
+
+# ============================================================
+# AUTO CLICK LOOP
+# ============================================================
 
 def auto_click_loop():
     global running
     while True:
         if running and auto_click_enabled:
-            # Random click interval
-            interval = random.randint(click_interval_min, click_interval_max)
-            
             # Click based on button type
             if click_button_type == "left":
                 mouse.click(Button.left)
             else:
                 mouse.click(Button.right)
             
-            time.sleep(interval / 1000)
+            time.sleep(click_interval / 1000)
         else:
             time.sleep(0.1)
 
@@ -158,32 +146,22 @@ def on_press(key):
 # ============================================================
 
 root = tk.Tk()
-root.title("Minecraft Bot Controller - Enhanced")
-root.geometry("380x620")
+root.title("Minecraft Bot - Click & Sway")
+root.geometry("380x450")
 
-def build_range_entry(label, min_default, max_default):
+def build_entry(label, default):
     frame = tk.Frame(root)
     frame.pack(pady=3)
     tk.Label(frame, text=label, width=25, anchor='w').pack(side=tk.LEFT)
     
-    e_min = tk.Entry(frame, width=8)
-    e_min.insert(0, str(min_default))
-    e_min.pack(side=tk.LEFT, padx=2)
+    entry = tk.Entry(frame, width=10)
+    entry.insert(0, str(default))
+    entry.pack(side=tk.LEFT, padx=2)
     
-    tk.Label(frame, text="to").pack(side=tk.LEFT)
-    
-    e_max = tk.Entry(frame, width=8)
-    e_max.insert(0, str(max_default))
-    e_max.pack(side=tk.LEFT, padx=2)
-    
-    return e_min, e_max
+    return entry
 
-tk.Label(root, text="Movement Settings (randomized)", font=("Arial", 10, "bold")).pack(pady=5)
-entry_w_min, entry_w_max = build_range_entry("W hold time (ms):", w_time_min, w_time_max)
-entry_s_min, entry_s_max = build_range_entry("S hold time (ms):", s_time_min, s_time_max)
-
-tk.Label(root, text="Click Settings (randomized)", font=("Arial", 10, "bold")).pack(pady=5)
-entry_click_min, entry_click_max = build_range_entry("Click interval (ms):", click_interval_min, click_interval_max)
+tk.Label(root, text="Click Settings", font=("Arial", 10, "bold")).pack(pady=5)
+entry_click = build_entry("Click interval (ms):", click_interval)
 
 # Click button type selection
 click_frame = tk.Frame(root)
@@ -193,19 +171,20 @@ click_type_var = tk.StringVar(value="left")
 tk.Radiobutton(click_frame, text="Left Click", variable=click_type_var, value="left").pack(side=tk.LEFT)
 tk.Radiobutton(click_frame, text="Right Click", variable=click_type_var, value="right").pack(side=tk.LEFT)
 
-tk.Label(root, text="Mouse Sway Settings (randomized)", font=("Arial", 10, "bold")).pack(pady=5)
-entry_sway_min, entry_sway_max = build_range_entry("Sway offset (px):", sway_offset_min, sway_offset_max)
-entry_sway_speed_min, entry_sway_speed_max = build_range_entry("Sway speed (ms/step):", sway_speed_min, sway_speed_max)
+tk.Label(root, text="Mouse Sway Settings", font=("Arial", 10, "bold")).pack(pady=5)
+entry_sway = build_entry("Sway offset (px):", sway_offset)
+entry_sway_speed = build_entry("Sway speed (ms/step):", sway_speed)
+entry_sway_interval = build_entry("Sway interval (ms):", sway_interval)
 
 # Checkboxes
 tk.Label(root, text="Enable/Disable Features", font=("Arial", 10, "bold")).pack(pady=5)
-auto_move_var = tk.BooleanVar(value=True)
 auto_click_var = tk.BooleanVar(value=True)
 mouse_sway_var = tk.BooleanVar(value=True)
+hold_shift_var = tk.BooleanVar(value=True)
 
-tk.Checkbutton(root, text="Enable Auto-Move (W/S)", variable=auto_move_var).pack()
 tk.Checkbutton(root, text="Enable Auto-Click", variable=auto_click_var).pack()
 tk.Checkbutton(root, text="Enable Mouse Sway", variable=mouse_sway_var).pack()
+tk.Checkbutton(root, text="Enable Hold Left Shift", variable=hold_shift_var).pack()
 
 def safe_int(entry, default):
     """Safely parse integer from entry with fallback."""
@@ -215,59 +194,39 @@ def safe_int(entry, default):
         return default
 
 def update_values():
-    global w_time_min, w_time_max, s_time_min, s_time_max
-    global click_interval_min, click_interval_max
-    global sway_offset_min, sway_offset_max
-    global sway_speed_min, sway_speed_max
-    global auto_move_enabled, auto_click_enabled, mouse_sway_enabled
+    global click_interval
+    global sway_offset
+    global sway_speed
+    global sway_interval
+    global auto_click_enabled, mouse_sway_enabled, hold_shift_enabled
     global click_button_type
 
-    # Update ranges with validation
-    w_time_min = max(0, safe_int(entry_w_min, 0))
-    w_time_max = max(w_time_min, safe_int(entry_w_max, 2000))
+    # Update values with validation
+    click_interval = max(50, safe_int(entry_click, 500))
     
-    s_time_min = max(0, safe_int(entry_s_min, 0))
-    s_time_max = max(s_time_min, safe_int(entry_s_max, 2000))
+    sway_offset = max(0, safe_int(entry_sway, 50))
     
-    click_interval_min = max(50, safe_int(entry_click_min, 500))
-    click_interval_max = max(click_interval_min, safe_int(entry_click_max, 1000))
+    sway_speed = max(0, safe_int(entry_sway_speed, 5))
     
-    sway_offset_min = max(0, safe_int(entry_sway_min, 0))
-    sway_offset_max = max(sway_offset_min, safe_int(entry_sway_max, 100))
-    
-    sway_speed_min = max(0, safe_int(entry_sway_speed_min, 0))
-    sway_speed_max = max(sway_speed_min, safe_int(entry_sway_speed_max, 10))
+    sway_interval = max(0, safe_int(entry_sway_interval, 2000))
 
-    auto_move_enabled = auto_move_var.get()
     auto_click_enabled = auto_click_var.get()
     mouse_sway_enabled = mouse_sway_var.get()
+    hold_shift_enabled = hold_shift_var.get()
     click_button_type = click_type_var.get()
     
     # Update display to show corrected values
-    entry_w_min.delete(0, tk.END)
-    entry_w_min.insert(0, str(w_time_min))
-    entry_w_max.delete(0, tk.END)
-    entry_w_max.insert(0, str(w_time_max))
+    entry_click.delete(0, tk.END)
+    entry_click.insert(0, str(click_interval))
     
-    entry_s_min.delete(0, tk.END)
-    entry_s_min.insert(0, str(s_time_min))
-    entry_s_max.delete(0, tk.END)
-    entry_s_max.insert(0, str(s_time_max))
+    entry_sway.delete(0, tk.END)
+    entry_sway.insert(0, str(sway_offset))
     
-    entry_click_min.delete(0, tk.END)
-    entry_click_min.insert(0, str(click_interval_min))
-    entry_click_max.delete(0, tk.END)
-    entry_click_max.insert(0, str(click_interval_max))
+    entry_sway_speed.delete(0, tk.END)
+    entry_sway_speed.insert(0, str(sway_speed))
     
-    entry_sway_min.delete(0, tk.END)
-    entry_sway_min.insert(0, str(sway_offset_min))
-    entry_sway_max.delete(0, tk.END)
-    entry_sway_max.insert(0, str(sway_offset_max))
-    
-    entry_sway_speed_min.delete(0, tk.END)
-    entry_sway_speed_min.insert(0, str(sway_speed_min))
-    entry_sway_speed_max.delete(0, tk.END)
-    entry_sway_speed_max.insert(0, str(sway_speed_max))
+    entry_sway_interval.delete(0, tk.END)
+    entry_sway_interval.insert(0, str(sway_interval))
 
 tk.Button(root, text="Update Values", command=update_values, bg="#4CAF50", fg="white", font=("Arial", 10, "bold")).pack(pady=10)
 tk.Button(root, text="Start/Stop (F6)", command=toggle_running, bg="#2196F3", fg="white", font=("Arial", 10, "bold")).pack()
@@ -278,7 +237,8 @@ status_label.pack(pady=15)
 tk.Label(root, text="Press F6 to toggle bot on/off", fg="gray").pack()
 
 # Start threads
-threading.Thread(target=movement_loop, daemon=True).start()
+threading.Thread(target=shift_hold_loop, daemon=True).start()
+threading.Thread(target=sway_loop, daemon=True).start()
 threading.Thread(target=auto_click_loop, daemon=True).start()
 
 listener = KeyListener(on_press=on_press)
